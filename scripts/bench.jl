@@ -1,5 +1,6 @@
 using Plots
 using BenchmarkTools
+using CUDA
 
 function memcopy_ap!(A, B, C, s)
     A .= B .+ s .* C
@@ -16,6 +17,13 @@ function memcopy_kp!(A, B, C, s)
     return
 end
 
+function memcopy_gp!(A, B, C, s)
+    ix = (blockIdx().x-1) * blockDim().x + threadIdx().x
+    iy = (blockIdx().y-1) * blockDim().y + threadIdx().y
+    A[ix, iy] = B[ix, iy] + s * C[ix, iy]
+    return
+end
+
 function benchmark(; nexp=3)
     n_vec = []
     t_vec = []
@@ -25,9 +33,12 @@ function benchmark(; nexp=3)
         A = zeros(Float64, nx, ny)
         B = ones(Float64, nx, ny)
         C = rand(Float64, nx, ny)
+        threads = (16, 16)
+        blocks = (nx ÷ threads[1], ny ÷ threads[2])
 
         t_ap = @belapsed memcopy_ap!($A, $B, $C, $s)
-        t_kp = @belapsed memcopy_kp!($A, $B, $C, $s)
+        # t_kp = @belapsed memcopy_kp!($A, $B, $C, $s)
+        t_kp = @belapsed begin @cuda CUDA.@sync blocks=$blocks threads=$threads memcopy_gp!($A, $B, $C, $s) end
 
         N = 3 / 1e9 * nx * ny * sizeof(eltype(A))
         println("Memory copy benchmark (nx = ny = $(nx)):")
